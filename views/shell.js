@@ -13,6 +13,7 @@ function shell({ title, bodyContent, locale = "fr" }) {
   const lang = t(locale, "shell.lang");
   const updatedLabel = t(locale, "shell.updatedAt");
   const dateStr = new Date().toLocaleString(intlLocale(locale));
+  const languageLabel = t(locale, "shell.language");
 
   return `<!DOCTYPE html>
 <html lang="${lang}">
@@ -69,10 +70,33 @@ function shell({ title, bodyContent, locale = "fr" }) {
             color: #aaa;
             text-align: center;
         }
+        .language-switcher {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 18px;
+            font-size: 0.8rem;
+        }
+        .language-switcher select {
+            border: 1px solid #c7d0dc;
+            border-radius: 6px;
+            background: #fff;
+            color: #202124;
+            padding: 4px 8px;
+            font: inherit;
+        }
     </style>
 </head>
 <body>
     <div class="container">
+        <div class="language-switcher">
+            <label for="language-selector">${escapeHtml(languageLabel)}</label>
+            <select id="language-selector" aria-label="${escapeHtml(languageLabel)}">
+                <option value="fr"${locale === "fr" ? " selected" : ""}>${escapeHtml(t(locale, "shell.language.fr"))}</option>
+                <option value="en"${locale === "en" ? " selected" : ""}>${escapeHtml(t(locale, "shell.language.en"))}</option>
+            </select>
+        </div>
         ${bodyContent}
         <p class="footer">${escapeHtml(updatedLabel)} ${escapeHtml(dateStr)}</p>
     </div>
@@ -91,6 +115,41 @@ function shell({ title, bodyContent, locale = "fr" }) {
     })();
     </script>
     <!-- End Matomo Code -->
+    <script>
+    (function () {
+        var key = 'google-slot-proxy-language';
+        var browserLanguage = (navigator.languages || [navigator.language || 'en'])[0];
+        var browserLocale = browserLanguage.toLowerCase().split('-')[0] === 'fr' ? 'fr' : 'en';
+        var currentLocale = document.documentElement.lang;
+        var storedLocale = null;
+        try { storedLocale = localStorage.getItem(key); } catch (_) {}
+
+        if (storedLocale === browserLocale) {
+            try { localStorage.removeItem(key); } catch (_) {}
+            storedLocale = null;
+        }
+        if ((storedLocale === 'fr' || storedLocale === 'en') && storedLocale !== currentLocale) {
+            var url = new URL(window.location.href);
+            url.searchParams.set('lang', storedLocale);
+            window.location.replace(url);
+            return;
+        }
+
+        var selector = document.getElementById('language-selector');
+        selector.addEventListener('change', function () {
+            var selectedLocale = selector.value;
+            var url = new URL(window.location.href);
+            if (selectedLocale === browserLocale) {
+                try { localStorage.removeItem(key); } catch (_) {}
+                url.searchParams.delete('lang');
+            } else {
+                try { localStorage.setItem(key, selectedLocale); } catch (_) {}
+                url.searchParams.set('lang', selectedLocale);
+            }
+            window.location.assign(url);
+        });
+    }());
+    </script>
 </body>
 </html>`;
 }

@@ -4,12 +4,19 @@
   "description": "A simple proxy for fetching Google Calendar appointment scheduling available slots, for people who don't want or can't use the Google Calendar web interface.",
   "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "mocha test/**/*.test.js --timeout 30000 --exit",
+    "test:live": "NODE_ENV=development LIVE_CALENDAR_TESTS=1 mocha test/**/*.test.js --timeout 180000 --exit"
   },
   "author": "Boris Schapira",
   "type": "commonjs",
   "dependencies": {
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "puppeteer": "^25.9.0"
+  },
+  "devDependencies": {
+    "chai": "^4.5.0",
+    "mocha": "^11.7.2"
   }
 }

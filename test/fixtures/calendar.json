@@ -1,0 +1,12 @@
+{
+  "title": "Fixture calendar",
+  "days": [
+    {
+      "fullDate": "Monday, September 7, 2026",
+      "slots": [
+        { "label": "09:00", "tsMs": 1788771600000 },
+        { "label": "09:30", "tsMs": 1788773400000 }
+      ]
+    }
+  ]
+}

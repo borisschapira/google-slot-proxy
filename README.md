@@ -7,17 +7,17 @@ A lightweight Node.js proxy that scrapes Google Calendar appointment scheduling 
 ## How it works
 
 ```
-Browser → Express server → Browserless (remote Chrome) → Google Calendar → slots
+Browser → Express server → local Puppeteer (dev) / Browserless (prod) → Google Calendar → slots
 ```
 
-On each page visit, a headless Chrome session (hosted by [Browserless](https://browserless.io)) navigates the Google Calendar scheduling page, extracts available slots week by week, and renders them as a simple HTML page. The language is automatically detected from the visitor's `Accept-Language` header (French or English).
+On each page visit, a headless Chrome session navigates the Google Calendar scheduling page, extracts available slots week by week, and renders them as a simple HTML page. In development, Chrome is launched locally by Puppeteer; other environments use [Browserless](https://browserless.io). The language defaults to the visitor's `Accept-Language` header (French or English), and can be changed with the selector in the Shell.
 
 ---
 
 ## Prerequisites
 
 - **Node.js 22+**
-- A **[Browserless](https://browserless.io)** account and API token (I used the free tier: 6 h/month)
+- A **[Browserless](https://browserless.io)** account and API token for production (I used the free tier: 6 h/month)
 
 ---
 
@@ -49,10 +49,10 @@ All configuration is done via environment variables.
 
 | Variable | Required | Description |
 |---|---|---|
-| `BROWSERLESS_TOKEN` | ✅ | API token from [browserless.io](https://browserless.io) |
+| `BROWSERLESS_TOKEN` | Production | API token from [browserless.io](https://browserless.io) |
 | `PORT` | No | Port to listen on (default: `3000`) |
 
-Add the `BROWSERLESS_TOKEN` to your environment or `.env` file before starting the server.
+Add `BROWSERLESS_TOKEN` to the production environment or `.env` file before starting the server. It is not needed in development.
 
 
 ### Local development
@@ -60,6 +60,7 @@ Add the `BROWSERLESS_TOKEN` to your environment or `.env` file before starting t
 Create a `.env` file at the project root:
 
 ```
+# Required in production only
 BROWSERLESS_TOKEN=your_token_here
 PORT=3000
 ```
@@ -67,10 +68,37 @@ PORT=3000
 Then load it when starting:
 
 ```bash
+NODE_ENV=development node server.js
+# Production:
 node --env-file=.env server.js
 # or, with npm:
 npm start   # if you configure dotenv in package.json scripts
 ```
+
+### Tests
+
+The deterministic end-to-end suite uses Node's built-in test runner and
+Puppeteer against an ephemeral local server. It covers the homepage, locale
+selection, calendar loading, and the API contract with fixture data:
+
+```bash
+npm test
+```
+
+Live calendar integration tests use the configured Google Calendar URLs and
+local Puppeteer scraping. They are opt-in because availability and Google's
+DOM can change:
+
+```bash
+npm run test:live
+```
+
+This command sets `NODE_ENV=development`, so the scraper launches a local
+Puppeteer browser instead of requiring a Browserless token.
+
+A deterministic test failure indicates an application regression. A live-only
+failure may indicate changed calendar data or DOM behavior; inspect the
+`/debug/30min` route before changing the scraper.
 
 > **Tip:** install [`dotenv`](https://www.npmjs.com/package/dotenv) or use Node 20.6+'s built-in `--env-file` flag.
 
@@ -121,7 +149,7 @@ To add or remove a calendar, edit the `CALENDARS` array in `config.js` — all r
 
 ## Internationalisation
 
-The UI is available in **French** and **English**. The language is detected automatically from the `Accept-Language` HTTP header sent by the visitor's browser. French is used when it is the top-priority language; English is the fallback.
+The UI is available in **French** and **English**. The initial language is detected from the `Accept-Language` HTTP header sent by the visitor's browser. French is used when it is the top-priority language; English is the fallback. The Shell's selector lets visitors choose either language. A choice different from the browser language is remembered in `localStorage`; choosing the browser language again removes that preference.
 
 To test locally:
 
@@ -143,7 +171,7 @@ app.js                 Express app — middleware and route mounting
 config.js              Calendar definitions and constants
 │
 lib/
-│  scraper.js          Puppeteer/Browserless scraping logic
+│  scraper.js          Puppeteer local/Browserless scraping logic
 │  helpers.js          Shared utilities (escapeHtml, groupByWeek, sleep)
 │  i18n.js             Translations, locale detection, plural helpers
 │

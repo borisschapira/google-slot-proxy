@@ -1,6 +1,6 @@
 const { Router } = require("express");
 const { CALENDARS, CALENDAR_MAP } = require("../config");
-const { detectLocale } = require("../lib/i18n");
+const { resolveLocale } = require("../lib/i18n");
 const {
   scrapeDebugInfo,
   screenshotPage,
@@ -11,13 +11,13 @@ const { renderDebugIndex, renderDebugError } = require("../views/debug.view");
 const router = Router();
 
 router.get("/", (req, res) => {
-  const locale = detectLocale(req);
+  const locale = resolveLocale(req);
   res.send(renderDebugIndex(CALENDARS, locale));
 });
 
 router.get("/:calId", async (req, res) => {
   const cal = CALENDAR_MAP[req.params.calId];
-  const locale = detectLocale(req);
+  const locale = resolveLocale(req);
   if (!cal) return res.status(404).send("Not found.");
 
   try {

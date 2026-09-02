@@ -113,10 +113,25 @@ function renderLoading(cal, locale = 'fr') {
         }
         .empty { color: #666; font-style: italic; text-align: center; padding: 40px 0; }
         .footer { margin-top: 32px; font-size: 0.75rem; color: #aaa; text-align: center; }
+        .language-switcher {
+            display: flex; justify-content: flex-end; align-items: center;
+            gap: 8px; margin-bottom: 18px; font-size: 0.8rem;
+        }
+        .language-switcher select {
+            border: 1px solid #c7d0dc; border-radius: 6px; background: #fff;
+            color: #202124; padding: 4px 8px; font: inherit;
+        }
     </style>
 </head>
 <body>
 <div class="container">
+    <div class="language-switcher">
+        <label for="language-selector">${escapeHtml(t(locale, 'shell.language'))}</label>
+        <select id="language-selector" aria-label="${escapeHtml(t(locale, 'shell.language'))}">
+            <option value="fr"${locale === 'fr' ? ' selected' : ''}>${escapeHtml(t(locale, 'shell.language.fr'))}</option>
+            <option value="en"${locale === 'en' ? ' selected' : ''}>${escapeHtml(t(locale, 'shell.language.en'))}</option>
+        </select>
+    </div>
     <div id="loading">
         <div class="spinner"></div>
         <p class="loading-title">${escapeHtml(t(locale, 'loading.heading'))}</p>
@@ -130,6 +145,33 @@ function renderLoading(cal, locale = 'fr') {
 (function () {
     const CAL   = ${JSON.stringify({ id: cal.id, label: cal.label, emoji: cal.emoji, originalUrl: cal.originalUrl, description: cal.description[locale] ?? cal.description.en })};
     const I18N  = ${JSON.stringify(clientI18N)};
+    const LANGUAGE_KEY = 'google-slot-proxy-language';
+    const browserLanguage = (navigator.languages || [navigator.language || 'en'])[0];
+    const browserLocale = browserLanguage.toLowerCase().split('-')[0] === 'fr' ? 'fr' : 'en';
+    let storedLocale = null;
+    try { storedLocale = localStorage.getItem(LANGUAGE_KEY); } catch (_) {}
+    if (storedLocale === browserLocale) {
+        try { localStorage.removeItem(LANGUAGE_KEY); } catch (_) {}
+        storedLocale = null;
+    }
+    if ((storedLocale === 'fr' || storedLocale === 'en') && storedLocale !== I18N.locale) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('lang', storedLocale);
+        window.location.replace(url);
+        return;
+    }
+    document.getElementById('language-selector').addEventListener('change', event => {
+        const selectedLocale = event.target.value;
+        const url = new URL(window.location.href);
+        if (selectedLocale === browserLocale) {
+            try { localStorage.removeItem(LANGUAGE_KEY); } catch (_) {}
+            url.searchParams.delete('lang');
+        } else {
+            try { localStorage.setItem(LANGUAGE_KEY, selectedLocale); } catch (_) {}
+            url.searchParams.set('lang', selectedLocale);
+        }
+        window.location.assign(url);
+    });
 
     // Rehydrate plural functions from their serialized source
     const plural = {};
