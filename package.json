@@ -1,0 +1,15 @@
+{
+  "name": "google-slot-proxy",
+  "version": "1.0.0",
+  "description": "A simple proxy for fetching Google Calendar appointment scheduling available slots, for people who don't want or can't use the Google Calendar web interface.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "Boris Schapira",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "puppeteer": "^25.9.0"
+  }
+}
