@@ -78,6 +78,8 @@ describe("Google Slot Proxy", function () {
     try {
       await page.waitForSelector("#results.visible");
       expect(await page.$eval("#loading", (loading) => getComputedStyle(loading).display)).to.equal("none");
+      expect(await page.$eval("#timezone-selector", (selector) => selector.disabled)).to.equal(false);
+      expect(await page.$$eval("#timezone-selector option", (options) => options.map((option) => option.value))).to.include("Europe/Paris");
       expect((await page.$$(".day-card")).length).to.equal(fixture.days.length);
       expect((await page.$$(".slot")).length).to.equal(2);
     } finally {
@@ -96,7 +98,8 @@ describe("Google Slot Proxy", function () {
       const response = await page.goto(`${baseUrl}/api/30min`, { waitUntil: "domcontentloaded" });
       const body = await response.json();
       expect(response.status()).to.equal(200);
-      expect(Object.keys(body)).to.deep.equal(["title", "cal", "days"]);
+      expect(Object.keys(body)).to.deep.equal(["title", "timeZone", "cal", "days"]);
+      expect(body.timeZone).to.equal("Europe/Paris");
       expect(body.cal.id).to.equal("30min");
       expect(body.days).to.deep.equal(fixture.days);
     } finally {

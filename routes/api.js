@@ -3,7 +3,7 @@
 // Called by the client-side loading page; does the heavy Puppeteer work.
 
 const { Router } = require('express');
-const { CALENDAR_MAP } = require('../config');
+const { CALENDAR_MAP, CALENDAR_TIME_ZONE } = require('../config');
 const { scrapeCalendar } = require('../lib/scraper');
 
 function createApiRouter(scraper = scrapeCalendar) {
@@ -17,6 +17,7 @@ function createApiRouter(scraper = scrapeCalendar) {
             const data = await scraper(cal.originalUrl);
             res.json({
                 title: data.title,
+                timeZone: CALENDAR_TIME_ZONE,
                 cal:   { id: cal.id, label: cal.label, emoji: cal.emoji, originalUrl: cal.originalUrl, description: cal.description },
                 days:  data.days,
             });

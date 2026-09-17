@@ -22,6 +22,7 @@ function renderLoading(cal, locale = 'fr') {
         },
         strings: {
             back:               t(locale, 'nav.back'),
+            timezone:           t(locale, 'shell.timezone'),
             calH1prefix:        t(locale, 'cal.h1prefix'),
             noticeStrong:       t(locale, 'cal.notice.strong'),
             noticeBook:         t(locale, 'cal.notice.book'),
@@ -121,6 +122,14 @@ function renderLoading(cal, locale = 'fr') {
             border: 1px solid #c7d0dc; border-radius: 6px; background: #fff;
             color: #202124; padding: 4px 8px; font: inherit;
         }
+        .timezone-switcher {
+            display: flex; justify-content: flex-end; align-items: center;
+            gap: 8px; margin-bottom: 18px; font-size: 0.8rem;
+        }
+        .timezone-switcher select {
+            border: 1px solid #c7d0dc; border-radius: 6px; background: #fff;
+            color: #202124; padding: 4px 8px; font: inherit;
+        }
     </style>
 </head>
 <body>
@@ -131,6 +140,10 @@ function renderLoading(cal, locale = 'fr') {
             <option value="fr"${locale === 'fr' ? ' selected' : ''}>${escapeHtml(t(locale, 'shell.language.fr'))}</option>
             <option value="en"${locale === 'en' ? ' selected' : ''}>${escapeHtml(t(locale, 'shell.language.en'))}</option>
         </select>
+    </div>
+    <div class="timezone-switcher">
+        <label for="timezone-selector">${escapeHtml(t(locale, 'shell.timezone'))}</label>
+        <select id="timezone-selector" aria-label="${escapeHtml(t(locale, 'shell.timezone'))}" disabled></select>
     </div>
     <div id="loading">
         <div class="spinner"></div>
@@ -146,6 +159,9 @@ function renderLoading(cal, locale = 'fr') {
     const CAL   = ${JSON.stringify({ id: cal.id, label: cal.label, emoji: cal.emoji, originalUrl: cal.originalUrl, description: cal.description[locale] ?? cal.description.en })};
     const I18N  = ${JSON.stringify(clientI18N)};
     const LANGUAGE_KEY = 'google-slot-proxy-language';
+    const TIMEZONE_KEY = 'google-slot-proxy-timezone';
+    const calendarTimeZone = 'Europe/Paris';
+    const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || calendarTimeZone;
     const browserLanguage = (navigator.languages || [navigator.language || 'en'])[0];
     const browserLocale = browserLanguage.toLowerCase().split('-')[0] === 'fr' ? 'fr' : 'en';
     let storedLocale = null;
@@ -186,28 +202,76 @@ function renderLoading(cal, locale = 'fr') {
             .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
+    function isValidTimeZone(timeZone) {
+        try {
+            new Intl.DateTimeFormat('en', { timeZone }).format();
+            return true;
+        } catch (_) {
+            return false;
+        }
+    }
+
+    function timezoneLabel(timeZone) {
+        return timeZone.replaceAll('_', ' ') + (timeZone === browserTimeZone ? ' (local)' : '');
+    }
+
+    function setupTimezoneSelector(data) {
+        const selector = document.getElementById('timezone-selector');
+        const options = [browserTimeZone, data.timeZone || calendarTimeZone]
+            .filter((timeZone, index, values) => isValidTimeZone(timeZone) && values.indexOf(timeZone) === index);
+        let selected = browserTimeZone;
+        try {
+            const stored = localStorage.getItem(TIMEZONE_KEY);
+            if (stored && options.includes(stored)) selected = stored;
+        } catch (_) {}
+        selector.innerHTML = options.map(timeZone =>
+            '<option value="' + esc(timeZone) + '"' + (timeZone === selected ? ' selected' : '') + '>' +
+            esc(timezoneLabel(timeZone)) + '</option>'
+        ).join('');
+        selector.disabled = false;
+        selector.value = selected;
+        return selected;
+    }
+
     // Client-side groupByWeek (mirrors lib/helpers.js)
-    function groupByWeek(days) {
+    function formatDate(tsMs, timeZone) {
+        return new Intl.DateTimeFormat(I18N.intlLocale, {
+            timeZone, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+        }).format(new Date(tsMs));
+    }
+
+    function formatTime(tsMs, timeZone) {
+        const options = { timeZone, hour: '2-digit', minute: '2-digit' };
+        if (I18N.locale === 'fr') options.hourCycle = 'h23';
+        return new Intl.DateTimeFormat(I18N.intlLocale, options).format(new Date(tsMs));
+    }
+
+    function dateKey(tsMs, timeZone) {
+        return new Intl.DateTimeFormat('en-CA', {
+            timeZone, year: 'numeric', month: '2-digit', day: '2-digit'
+        }).format(new Date(tsMs));
+    }
+
+    function groupByWeek(days, timeZone) {
         const weeks = new Map();
-        const tag   = I18N.intlLocale;
         for (const day of days) {
             const ts = day.slots[0]?.tsMs;
             if (!ts) continue;
-            const d   = new Date(ts);
-            const dow = (d.getDay() + 6) % 7;
+            const date = dateKey(ts, timeZone);
+            const d = new Date(date + "T00:00:00Z");
+            const dow = (d.getUTCDay() + 6) % 7;
             const mon = new Date(d);
-            mon.setDate(d.getDate() - dow);
-            mon.setHours(0, 0, 0, 0);
+            mon.setUTCDate(d.getUTCDate() - dow);
             const key = mon.toISOString();
             if (!weeks.has(key)) weeks.set(key, { monday: mon, days: [] });
             weeks.get(key).days.push(day);
         }
-        const fmt = d => d.toLocaleDateString(tag, { day: 'numeric', month: 'long' });
+        const fmt = d => d.toLocaleDateString(I18N.intlLocale, { day: 'numeric', month: 'long', timeZone: 'UTC' });
         return [...weeks.entries()]
             .sort(([a],[b]) => a.localeCompare(b))
             .map(([,{monday, days}]) => {
                 const sun = new Date(monday);
-                sun.setDate(monday.getDate() + 6);
+                sun.setUTCDate(monday.getUTCDate() + 6);
                 const label = I18N.strings.weekTemplate
                     .replace('{from}', fmt(monday))
                     .replace('{to}',   fmt(sun));
@@ -215,9 +279,9 @@ function renderLoading(cal, locale = 'fr') {
             });
     }
 
-    function renderResults(data) {
+    function renderResults(data, displayTimeZone) {
         const s     = I18N.strings;
-        const weeks = groupByWeek(data.days);
+        const weeks = groupByWeek(data.days, displayTimeZone);
         const totalSlots = data.days.reduce((n, d) => n + d.slots.length, 0);
 
         const h1 = s.calH1prefix
@@ -233,10 +297,10 @@ function renderLoading(cal, locale = 'fr') {
                     const c = day.slots.length;
                     return '<div class="day-card">' +
                         '<div class="day-header">' +
-                        '<span class="day-name">'  + esc(day.fullDate) + '</span>' +
+                        '<span class="day-name">'  + esc(formatDate(day.slots[0].tsMs, displayTimeZone)) + '</span>' +
                         '<span class="slot-count">' + esc(plural.slots(c)) + '</span>' +
                         '</div><div class="slots">' +
-                        day.slots.map(sl => '<span class="slot">' + esc(sl.label) + '</span>').join('') +
+                        day.slots.map(sl => '<span class="slot">' + esc(formatTime(sl.tsMs, displayTimeZone)) + '</span>').join('') +
                         '</div></div>';
                 }).join('') +
                 '</div></section>'
@@ -272,7 +336,16 @@ function renderLoading(cal, locale = 'fr') {
         .then(data => {
             document.getElementById('loading').style.display = 'none';
             const el = document.getElementById('results');
-            el.innerHTML = renderResults(data);
+            let displayTimeZone = setupTimezoneSelector(data);
+            const render = () => {
+                el.innerHTML = renderResults(data, displayTimeZone);
+            };
+            document.getElementById('timezone-selector').addEventListener('change', event => {
+                displayTimeZone = event.target.value;
+                try { localStorage.setItem(TIMEZONE_KEY, displayTimeZone); } catch (_) {}
+                render();
+            });
+            render();
             el.classList.add('visible');
         })
         .catch(err => {

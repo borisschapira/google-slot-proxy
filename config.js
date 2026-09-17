@@ -36,5 +36,6 @@ const CALENDARS = [
 const CALENDAR_MAP = Object.fromEntries(CALENDARS.map((c) => [c.id, c]));
 
 const MAX_EXTRA_WEEKS = 6;
+const CALENDAR_TIME_ZONE = "Europe/Paris";
 
-module.exports = { CALENDARS, CALENDAR_MAP, MAX_EXTRA_WEEKS };
+module.exports = { CALENDARS, CALENDAR_MAP, MAX_EXTRA_WEEKS, CALENDAR_TIME_ZONE };

@@ -11,6 +11,7 @@ Browser → Express server → local Puppeteer (dev) / Browserless (prod) → Go
 ```
 
 On each page visit, a headless Chrome session navigates the Google Calendar scheduling page, extracts available slots week by week, and renders them as a simple HTML page. In development, Chrome is launched locally by Puppeteer; other environments use [Browserless](https://browserless.io). The language defaults to the visitor's `Accept-Language` header (French or English), and can be changed with the selector in the Shell.
+Slot times are always rendered in the calendar's Europe/Paris timezone, regardless of the scraper or visitor machine timezone.
 
 ---
 
