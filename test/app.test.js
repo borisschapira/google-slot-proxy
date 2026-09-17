@@ -110,6 +110,72 @@ describe("Google Slot Proxy", function () {
   }
 });
 
+  it("reuses cached calendar data for five minutes when CACHE is enabled", async () => {
+  const previousCache = process.env.CACHE;
+  process.env.CACHE = "true";
+  let scrapeCount = 0;
+  const scraper = async () => {
+    scrapeCount += 1;
+    return { ...fixture, title: `Fixture ${scrapeCount}` };
+  };
+  const { server, baseUrl } = await startServer(scraper);
+  try {
+    const first = await fetch(`${baseUrl}/api/30min`);
+    const second = await fetch(`${baseUrl}/api/30min`);
+    expect((await first.json()).title).to.equal("Fixture 1");
+    expect((await second.json()).title).to.equal("Fixture 1");
+    expect(scrapeCount).to.equal(1);
+  } finally {
+    await closeServer(server);
+    if (previousCache === undefined) delete process.env.CACHE;
+    else process.env.CACHE = previousCache;
+  }
+});
+
+  it("refreshes cached calendar data after five minutes", async () => {
+  const previousCache = process.env.CACHE;
+  const previousNow = Date.now;
+  process.env.CACHE = "true";
+  let currentTime = 0;
+  Date.now = () => currentTime;
+  let scrapeCount = 0;
+  const { server, baseUrl } = await startServer(async () => {
+    scrapeCount += 1;
+    return { ...fixture, title: `Fixture ${scrapeCount}` };
+  });
+  try {
+    await fetch(`${baseUrl}/api/30min`);
+    currentTime = 5 * 60 * 1000;
+    const response = await fetch(`${baseUrl}/api/30min`);
+    expect((await response.json()).title).to.equal("Fixture 2");
+    expect(scrapeCount).to.equal(2);
+  } finally {
+    await closeServer(server);
+    Date.now = previousNow;
+    if (previousCache === undefined) delete process.env.CACHE;
+    else process.env.CACHE = previousCache;
+  }
+});
+
+  it("does not cache calendar data when CACHE is disabled", async () => {
+  const previousCache = process.env.CACHE;
+  delete process.env.CACHE;
+  let scrapeCount = 0;
+  const { server, baseUrl } = await startServer(async () => {
+    scrapeCount += 1;
+    return fixture;
+  });
+  try {
+    await fetch(`${baseUrl}/api/30min`);
+    await fetch(`${baseUrl}/api/30min`);
+    expect(scrapeCount).to.equal(2);
+  } finally {
+    await closeServer(server);
+    if (previousCache === undefined) delete process.env.CACHE;
+    else process.env.CACHE = previousCache;
+  }
+});
+
   (process.env.LIVE_CALENDAR_TESTS ? it : it.skip)("runs live calendar scraping when explicitly enabled", async () => {
   const { server, baseUrl } = await startServer();
   try {

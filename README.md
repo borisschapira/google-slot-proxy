@@ -52,6 +52,7 @@ All configuration is done via environment variables.
 |---|---|---|
 | `BROWSERLESS_TOKEN` | Production | API token from [browserless.io](https://browserless.io) |
 | `PORT` | No | Port to listen on (default: `3000`) |
+| `CACHE` | No | Set to `true` to reuse each calendar's scraped data for five minutes |
 
 Add `BROWSERLESS_TOKEN` to the production environment or `.env` file before starting the server. It is not needed in development.
 
@@ -64,6 +65,7 @@ Create a `.env` file at the project root:
 # Required in production only
 BROWSERLESS_TOKEN=your_token_here
 PORT=3000
+CACHE=true
 ```
 
 Then load it when starting:
