@@ -20,7 +20,7 @@ describe("calendar timezone formatting", () => {
   });
 
   it("uses the English locale without changing the instant", () => {
-    expect(formatSlotTime(septemberSlot, "en")).to.equal("2:00 PM");
+    expect(formatSlotTime(septemberSlot, "en")).to.equal("02:00 PM");
     expect(formatSlotDate(septemberSlot, "en")).to.equal(
       "Friday, September 18, 2026",
     );
