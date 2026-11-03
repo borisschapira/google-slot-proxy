@@ -77,11 +77,40 @@ describe("Google Slot Proxy", function () {
   const { browser, page } = await launchPage(`${baseUrl}/30min`);
     try {
       await page.waitForSelector("#results.visible");
+      expect(await page.$eval("#update-banner", (banner) => banner.hidden)).to.equal(false);
+      expect(await page.$eval("#update-banner a", (link) => link.getAttribute("href"))).to.equal("/api/30min?refresh=1");
       expect(await page.$eval("#loading", (loading) => getComputedStyle(loading).display)).to.equal("none");
       expect(await page.$eval("#timezone-selector", (selector) => selector.disabled)).to.equal(false);
       expect(await page.$$eval("#timezone-selector option", (options) => options.map((option) => option.value))).to.include("Europe/Paris");
       expect((await page.$$(".day-card")).length).to.equal(fixture.days.length);
       expect((await page.$$(".slot")).length).to.equal(2);
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await closeServer(server);
+  }
+});
+
+  it("refreshes calendar data in place when the update link is clicked", async () => {
+  let scrapeCount = 0;
+  const scraper = async () => {
+    scrapeCount += 1;
+    return { ...fixture, days: scrapeCount === 1 ? fixture.days : [] };
+  };
+  const { server, baseUrl } = await startServer(scraper);
+  try {
+    const { browser, page } = await launchPage(`${baseUrl}/30min`);
+    try {
+      await page.waitForSelector("#results.visible");
+      await Promise.all([
+        page.waitForResponse((response) => response.url().includes("/api/30min?refresh=1")),
+        page.click("#refresh-calendar"),
+      ]);
+      await page.waitForSelector("#results .empty");
+      expect(scrapeCount).to.equal(2);
+      expect(await page.$eval("#refresh-calendar", (link) => link.textContent)).to.equal("Refresh now");
+      expect(await page.$eval("#update-banner span", (label) => label.textContent)).to.include("Updated on");
     } finally {
       await browser.close();
     }
@@ -98,10 +127,11 @@ describe("Google Slot Proxy", function () {
       const response = await page.goto(`${baseUrl}/api/30min`, { waitUntil: "domcontentloaded" });
       const body = await response.json();
       expect(response.status()).to.equal(200);
-      expect(Object.keys(body)).to.deep.equal(["title", "timeZone", "cal", "days"]);
+      expect(Object.keys(body)).to.deep.equal(["title", "timeZone", "cal", "days", "updatedAt"]);
       expect(body.timeZone).to.equal("Europe/Paris");
       expect(body.cal.id).to.equal("30min");
       expect(body.days).to.deep.equal(fixture.days);
+      expect(new Date(body.updatedAt).toISOString()).to.equal(body.updatedAt);
     } finally {
       await browser.close();
     }
@@ -110,7 +140,7 @@ describe("Google Slot Proxy", function () {
   }
 });
 
-  it("reuses cached calendar data for five minutes when CACHE is enabled", async () => {
+  it("reuses cached calendar data for 15 minutes when CACHE is enabled", async () => {
   const previousCache = process.env.CACHE;
   process.env.CACHE = "true";
   let scrapeCount = 0;
@@ -122,8 +152,11 @@ describe("Google Slot Proxy", function () {
   try {
     const first = await fetch(`${baseUrl}/api/30min`);
     const second = await fetch(`${baseUrl}/api/30min`);
-    expect((await first.json()).title).to.equal("Fixture 1");
-    expect((await second.json()).title).to.equal("Fixture 1");
+    const firstBody = await first.json();
+    const secondBody = await second.json();
+    expect(firstBody.title).to.equal("Fixture 1");
+    expect(secondBody.title).to.equal("Fixture 1");
+    expect(secondBody.updatedAt).to.equal(firstBody.updatedAt);
     expect(scrapeCount).to.equal(1);
   } finally {
     await closeServer(server);
@@ -132,7 +165,7 @@ describe("Google Slot Proxy", function () {
   }
 });
 
-  it("refreshes cached calendar data after five minutes", async () => {
+  it("refreshes cached calendar data after 15 minutes", async () => {
   const previousCache = process.env.CACHE;
   const previousNow = Date.now;
   process.env.CACHE = "true";
@@ -145,13 +178,39 @@ describe("Google Slot Proxy", function () {
   });
   try {
     await fetch(`${baseUrl}/api/30min`);
-    currentTime = 5 * 60 * 1000;
-    const response = await fetch(`${baseUrl}/api/30min`);
-    expect((await response.json()).title).to.equal("Fixture 2");
+    currentTime = 15 * 60 * 1000 - 1;
+    const cachedResponse = await fetch(`${baseUrl}/api/30min`);
+    expect((await cachedResponse.json()).title).to.equal("Fixture 1");
+    expect(scrapeCount).to.equal(1);
+    currentTime = 15 * 60 * 1000;
+    const refreshedResponse = await fetch(`${baseUrl}/api/30min`);
+    expect((await refreshedResponse.json()).title).to.equal("Fixture 2");
     expect(scrapeCount).to.equal(2);
   } finally {
     await closeServer(server);
     Date.now = previousNow;
+    if (previousCache === undefined) delete process.env.CACHE;
+    else process.env.CACHE = previousCache;
+  }
+});
+
+  it("forces a scrape and replaces cached calendar data when refresh=1", async () => {
+  const previousCache = process.env.CACHE;
+  process.env.CACHE = "true";
+  let scrapeCount = 0;
+  const { server, baseUrl } = await startServer(async () => {
+    scrapeCount += 1;
+    return { ...fixture, title: `Fixture ${scrapeCount}` };
+  });
+  try {
+    await fetch(`${baseUrl}/api/30min`);
+    const forcedResponse = await fetch(`${baseUrl}/api/30min?refresh=1`);
+    const cachedResponse = await fetch(`${baseUrl}/api/30min`);
+    expect((await forcedResponse.json()).title).to.equal("Fixture 2");
+    expect((await cachedResponse.json()).title).to.equal("Fixture 2");
+    expect(scrapeCount).to.equal(2);
+  } finally {
+    await closeServer(server);
     if (previousCache === undefined) delete process.env.CACHE;
     else process.env.CACHE = previousCache;
   }

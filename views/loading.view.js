@@ -28,6 +28,9 @@ function renderLoading(cal, locale = 'fr') {
             noticeBook:         t(locale, 'cal.notice.book'),
             noticeLink:         t(locale, 'cal.notice.link'),
             noticeConfirm:      t(locale, 'cal.notice.confirm'),
+            refresh:            t(locale, 'cal.refresh'),
+            refreshing:         t(locale, 'cal.refreshing'),
+            refreshError:       t(locale, 'cal.refreshError'),
             weekTemplate:       TRANSLATIONS[locale]['cal.week'] ?? TRANSLATIONS.en['cal.week'],
             empty:              t(locale, 'cal.empty'),
             updatedAt:          t(locale, 'shell.updatedAt'),
@@ -114,6 +117,16 @@ function renderLoading(cal, locale = 'fr') {
         }
         .empty { color: #666; font-style: italic; text-align: center; padding: 40px 0; }
         .footer { margin-top: 32px; font-size: 0.75rem; color: #aaa; text-align: center; }
+        .update-banner {
+            display: flex; flex-wrap: wrap; align-items: center;
+            justify-content: space-between; gap: 8px 16px;
+            background: #e8f0fe; border-radius: 8px;
+            padding: 10px 14px; margin-bottom: 18px;
+            font-size: 0.84rem; color: #3c4043;
+        }
+        .update-banner a { font-weight: 600; white-space: nowrap; }
+        .update-banner a[aria-disabled="true"] { opacity: 0.65; pointer-events: none; }
+        #refresh-status { flex-basis: 100%; }
         .language-switcher {
             display: flex; justify-content: flex-end; align-items: center;
             gap: 8px; margin-bottom: 18px; font-size: 0.8rem;
@@ -134,6 +147,7 @@ function renderLoading(cal, locale = 'fr') {
 </head>
 <body>
 <div class="container">
+    <div id="update-banner" class="update-banner" role="status" aria-live="polite" hidden></div>
     <div class="language-switcher">
         <label for="language-selector">${escapeHtml(t(locale, 'shell.language'))}</label>
         <select id="language-selector" aria-label="${escapeHtml(t(locale, 'shell.language'))}">
@@ -307,8 +321,6 @@ function renderLoading(cal, locale = 'fr') {
             ).join('')
             : '<p class="empty">' + esc(s.empty) + '</p>';
 
-        const dateStr = new Date().toLocaleString(I18N.intlLocale);
-
         return '<a class="back" href="/">' + esc(s.back) + '</a>' +
             '<div class="page-header">' +
             '<h1>' + CAL.emoji + ' ' + h1 + '</h1>' +
@@ -324,11 +336,10 @@ function renderLoading(cal, locale = 'fr') {
             esc(plural.days(data.days.length)) + ' &nbsp;·&nbsp; ' +
             esc(plural.totalSlots(totalSlots)) +
             '</p>' +
-            weekSections +
-            '<p class="footer">' + esc(s.updatedAt) + ' ' + esc(dateStr) + '</p>';
+            weekSections;
     }
 
-    fetch('/api/' + CAL.id)
+    fetch('/api/' + CAL.id, { cache: 'no-store' })
         .then(res => {
             if (!res.ok) return res.json().then(j => Promise.reject(new Error(j.error || res.statusText)));
             return res.json();
@@ -336,10 +347,45 @@ function renderLoading(cal, locale = 'fr') {
         .then(data => {
             document.getElementById('loading').style.display = 'none';
             const el = document.getElementById('results');
+            const banner = document.getElementById('update-banner');
+            let calendarData = data;
             let displayTimeZone = setupTimezoneSelector(data);
             const render = () => {
-                el.innerHTML = renderResults(data, displayTimeZone);
+                el.innerHTML = renderResults(calendarData, displayTimeZone);
+                const dateStr = new Date(calendarData.updatedAt).toLocaleString(I18N.intlLocale);
+                banner.innerHTML =
+                    '<span>' + esc(I18N.strings.updatedAt) + ' ' + esc(dateStr) + '</span>' +
+                    '<a id="refresh-calendar" href="/api/' + esc(CAL.id) + '?refresh=1">' + esc(I18N.strings.refresh) + '</a>' +
+                    '<span id="refresh-status"></span>';
+                banner.hidden = false;
             };
+            let refreshing = false;
+            banner.addEventListener('click', event => {
+                const link = event.target.closest('#refresh-calendar');
+                if (!link || refreshing) return;
+                event.preventDefault();
+                refreshing = true;
+                link.setAttribute('aria-disabled', 'true');
+                link.textContent = I18N.strings.refreshing;
+                const status = banner.querySelector('#refresh-status');
+                status.textContent = '';
+                fetch(link.href, { cache: 'no-store' })
+                    .then(res => {
+                        if (!res.ok) return res.json().then(j => Promise.reject(new Error(j.error || res.statusText)));
+                        return res.json();
+                    })
+                    .then(updatedData => {
+                        calendarData = updatedData;
+                        render();
+                    })
+                    .catch(err => {
+                        const refreshLink = banner.querySelector('#refresh-calendar');
+                        refreshLink.removeAttribute('aria-disabled');
+                        refreshLink.textContent = I18N.strings.refresh;
+                        banner.querySelector('#refresh-status').textContent = I18N.strings.refreshError + err.message;
+                    })
+                    .finally(() => { refreshing = false; });
+            });
             document.getElementById('timezone-selector').addEventListener('change', event => {
                 displayTimeZone = event.target.value;
                 try { localStorage.setItem(TIMEZONE_KEY, displayTimeZone); } catch (_) {}

@@ -6,7 +6,7 @@ const { Router } = require('express');
 const { CALENDAR_MAP, CALENDAR_TIME_ZONE } = require('../config');
 const { scrapeCalendar } = require('../lib/scraper');
 
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_TTL_MS = 15 * 60 * 1000;
 
 function isCacheEnabled() {
     return ['1', 'true', 'yes', 'on'].includes((process.env.CACHE || '').toLowerCase());
@@ -22,10 +22,14 @@ function createApiRouter(scraper = scrapeCalendar) {
 
         try {
             let data;
-            if (isCacheEnabled()) {
+            let updatedAt;
+            const forceRefresh = req.query.refresh === '1';
+
+            if (isCacheEnabled() && !forceRefresh) {
                 const cached = cache.get(cal.id);
                 if (cached && Date.now() - cached.createdAt < CACHE_TTL_MS) {
                     data = cached.data;
+                    updatedAt = cached.createdAt;
                 } else {
                     cache.delete(cal.id);
                 }
@@ -33,8 +37,9 @@ function createApiRouter(scraper = scrapeCalendar) {
 
             if (data === undefined) {
                 data = await scraper(cal.originalUrl);
+                updatedAt = Date.now();
                 if (isCacheEnabled()) {
-                    cache.set(cal.id, { data, createdAt: Date.now() });
+                    cache.set(cal.id, { data, createdAt: updatedAt });
                 }
             }
 
@@ -43,6 +48,7 @@ function createApiRouter(scraper = scrapeCalendar) {
                 timeZone: CALENDAR_TIME_ZONE,
                 cal:   { id: cal.id, label: cal.label, emoji: cal.emoji, originalUrl: cal.originalUrl, description: cal.description },
                 days:  data.days,
+                updatedAt: new Date(updatedAt).toISOString(),
             });
         } catch (err) {
             console.error(`[api] scrape error for ${cal.id}:`, err);

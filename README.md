@@ -10,7 +10,7 @@ A lightweight Node.js proxy that scrapes Google Calendar appointment scheduling 
 Browser → Express server → local Puppeteer (dev) / Browserless (prod) → Google Calendar → slots
 ```
 
-On each page visit, a headless Chrome session navigates the Google Calendar scheduling page, extracts all available slots from each weekly view within the next 60 days, and renders them as a simple HTML page. In development, Chrome is launched locally by Puppeteer; other environments use [Browserless](https://browserless.io). The language defaults to the visitor's `Accept-Language` header (French or English), and can be changed with the selector in the Shell.
+On a cache miss, a headless Chrome session navigates the Google Calendar scheduling page, extracts all available slots from each weekly view within the next 60 days, and renders them as a simple HTML page. When caching is enabled, scraped data is reused for up to 15 minutes; the calendar page shows when its data was last updated and lets visitors force an immediate refresh. In development, Chrome is launched locally by Puppeteer; other environments use [Browserless](https://browserless.io). The language defaults to the visitor's `Accept-Language` header (French or English), and can be changed with the selector in the Shell.
 Slot times are always rendered in the calendar's Europe/Paris timezone, regardless of the scraper or visitor machine timezone.
 
 ---
@@ -52,7 +52,7 @@ All configuration is done via environment variables.
 |---|---|---|
 | `BROWSERLESS_TOKEN` | Production | API token from [browserless.io](https://browserless.io) |
 | `PORT` | No | Port to listen on (default: `3000`) |
-| `CACHE` | No | Set to `true` to reuse each calendar's scraped data for five minutes |
+| `CACHE` | No | Set to `true` to reuse each calendar's scraped data for up to 15 minutes |
 
 Add `BROWSERLESS_TOKEN` to the production environment or `.env` file before starting the server. It is not needed in development.
 
@@ -140,7 +140,8 @@ To add or remove a calendar, edit the `CALENDARS` array in `config.js` — all r
 | `GET /30min` | Available slots for the 30-minute calendar |
 | `GET /60min` | Available slots for the 60-minute calendar |
 | `GET /90min` | Available slots for the 90-minute calendar |
-| `GET /api/30min` | Raw JSON data for a calendar (used by the loading page) |
+| `GET /api/30min` | Raw JSON data, including its last-update timestamp (used by the loading page) |
+| `GET /api/30min?refresh=1` | Force a fresh scrape and replace the cached data when caching is enabled |
 | `GET /debug` | Debug index |
 | `GET /debug/30min` | JSON diagnostic report for a calendar |
 | `GET /debug/30min?shot=1` | Screenshot of what the scraper sees |
@@ -229,10 +230,21 @@ Set the variable in your environment or `.env` file (see Configuration).
 
 ### Slots page loads but shows nothing
 Visit `/debug/30min` to inspect what the scraper found. Key fields:
-- `dateRoleLists` — should list one entry per day with a year in the label
+- `allRoleLists` — should list the dates in the current calendar view
 - `allSlotButtons` — should list individual time slots
 
-If both are empty, Google may have changed their DOM. The scraper uses only ARIA roles (`role="list"`, `role="listitem"`) and `data-date-time` attributes, which are stable, but check `navButtons` to confirm the "next day" button label hasn't changed locale.
+If these fields contain dates and slots but loading fails with
+`Calendar view did not update after navigation`, the page is rendering data but
+its navigation may have changed. The scraper advances by selecting the first
+date after the visible week, opening the next month when that date is outside
+the current month grid. It does not rely on the last navigation button (which
+can be a day control). Inspect `navButtons` and `/debug/30min?html=1` to confirm
+that the next week's date button is present and labeled with its weekday and
+date.
+
+If `allRoleLists` and `allSlotButtons` are empty, Google may have changed its
+DOM. The scraper uses ARIA roles (`role="list"`, `role="listitem"`) and
+`data-date-time` attributes to locate dates and slots.
 
 ### `SyntaxError: Unexpected token '.'`
 The Node.js version on the server is too old. Upgrade to Node 18+.
