@@ -92,6 +92,63 @@ describe("Google Slot Proxy", function () {
   }
 });
 
+  it("keeps the loading indicator and retries after a rate limit", async () => {
+  let scrapeCount = 0;
+  const scraper = async () => {
+    scrapeCount += 1;
+    throw new Error("Unexpected server response: 429");
+  };
+  const { server, baseUrl } = await startServer(scraper);
+  try {
+    const browser = await puppeteer.launch({ headless: true });
+    try {
+      const page = await browser.newPage();
+      await page.setCacheEnabled(false);
+      await page.setExtraHTTPHeaders({ "Accept-Language": "fr-FR" });
+      await page.evaluateOnNewDocument(() => {
+        const originalSetTimeout = window.setTimeout;
+        window.setTimeout = function (callback, delay, ...args) {
+          if (delay === 120000) {
+            window.__retryDelay = delay;
+            window.__retryCallback = callback;
+            return 0;
+          }
+          return originalSetTimeout.call(this, callback, delay, ...args);
+        };
+      });
+
+      const firstResponsePromise = page.waitForResponse((response) =>
+        response.url().includes("/api/30min"),
+      );
+      await page.goto(`${baseUrl}/30min?lang=fr`, { waitUntil: "domcontentloaded" });
+      const firstResponse = await firstResponsePromise;
+      expect(firstResponse.status()).to.equal(429);
+      expect(firstResponse.headers()["retry-after"]).to.equal("120");
+      await page.waitForFunction(() => window.__retryDelay === 120000);
+      expect(await page.$eval("#loading", (loading) => getComputedStyle(loading).display)).to.equal("flex");
+      expect(await page.$eval("#loading", (loading) => loading.getAttribute("aria-busy"))).to.equal("true");
+      expect(await page.$eval(".loading-title", (heading) => heading.textContent)).to.include("2 minutes");
+      expect(await page.$eval("#error-box", (error) => getComputedStyle(error).display)).to.equal("none");
+
+      await Promise.all([
+        page.waitForNavigation({ waitUntil: "domcontentloaded" }),
+        page.evaluate(() => window.__retryCallback()),
+      ]);
+      const retryResponse = await page.waitForResponse((response) =>
+        response.url().includes("/api/30min"),
+      );
+      expect(retryResponse.status()).to.equal(429);
+      await page.waitForFunction(() => window.__retryDelay === 120000);
+      expect(scrapeCount).to.equal(2);
+      expect(page.url()).to.include("lang=fr");
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await closeServer(server);
+  }
+});
+
   it("refreshes calendar data in place when the update link is clicked", async () => {
   let scrapeCount = 0;
   const scraper = async () => {
@@ -162,6 +219,130 @@ describe("Google Slot Proxy", function () {
     await closeServer(server);
     if (previousCache === undefined) delete process.env.CACHE;
     else process.env.CACHE = previousCache;
+  }
+});
+
+  it("shares one scrape between concurrent requests when the cache is empty", async () => {
+  const previousCache = process.env.CACHE;
+  delete process.env.CACHE;
+  let scrapeCount = 0;
+  let finishScrape;
+  let startScrape;
+  const scrapeStarted = new Promise((resolve) => { startScrape = resolve; });
+  const scraper = async () => {
+    scrapeCount += 1;
+    startScrape();
+    return new Promise((resolve) => {
+      finishScrape = () => resolve(fixture);
+    });
+  };
+  const { server, baseUrl } = await startServer(scraper);
+  try {
+    const firstRequest = fetch(`${baseUrl}/api/30min`);
+    await scrapeStarted;
+    const secondRequest = fetch(`${baseUrl}/api/30min`);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(scrapeCount).to.equal(1);
+
+    finishScrape();
+    const [firstResponse, secondResponse] = await Promise.all([
+      firstRequest,
+      secondRequest,
+    ]);
+    const [firstBody, secondBody] = await Promise.all([
+      firstResponse.json(),
+      secondResponse.json(),
+    ]);
+    expect(firstResponse.status).to.equal(200);
+    expect(secondResponse.status).to.equal(200);
+    expect(firstBody.updatedAt).to.equal(secondBody.updatedAt);
+    expect(scrapeCount).to.equal(1);
+  } finally {
+    await closeServer(server);
+    if (previousCache === undefined) delete process.env.CACHE;
+    else process.env.CACHE = previousCache;
+  }
+});
+
+  it("serves the existing cache with its timestamp during a forced refresh", async () => {
+  const previousCache = process.env.CACHE;
+  process.env.CACHE = "true";
+  let scrapeCount = 0;
+  let startRefresh;
+  let finishRefresh;
+  const refreshStarted = new Promise((resolve) => { startRefresh = resolve; });
+  const scraper = async () => {
+    scrapeCount += 1;
+    if (scrapeCount === 1) return fixture;
+    startRefresh();
+    return new Promise((resolve) => {
+      finishRefresh = () => resolve({ ...fixture, title: "Refreshed fixture" });
+    });
+  };
+  const { server, baseUrl } = await startServer(scraper);
+  try {
+    const initialResponse = await fetch(`${baseUrl}/api/30min`);
+    const initialBody = await initialResponse.json();
+    const refreshRequest = fetch(`${baseUrl}/api/30min?refresh=1`);
+    await refreshStarted;
+
+    const concurrentResponse = await fetch(`${baseUrl}/api/30min`);
+    const concurrentBody = await concurrentResponse.json();
+    expect(concurrentResponse.status).to.equal(200);
+    expect(concurrentBody.title).to.equal(fixture.title);
+    expect(concurrentBody.updatedAt).to.equal(initialBody.updatedAt);
+    expect(new Date(concurrentBody.updatedAt).toString()).to.not.equal("Invalid Date");
+    expect(scrapeCount).to.equal(2);
+
+    finishRefresh();
+    const refreshedResponse = await refreshRequest;
+    const refreshedBody = await refreshedResponse.json();
+    expect(refreshedBody.title).to.equal("Refreshed fixture");
+    expect(new Date(refreshedBody.updatedAt).toString()).to.not.equal("Invalid Date");
+  } finally {
+    await closeServer(server);
+    if (previousCache === undefined) delete process.env.CACHE;
+    else process.env.CACHE = previousCache;
+  }
+});
+
+  it("does not display an invalid update date when the API timestamp is missing", async () => {
+  const { server, baseUrl } = await startServer(async () => fixture);
+  try {
+    const { browser, page } = await launchPage(baseUrl);
+    try {
+      await page.setRequestInterception(true);
+      page.on("request", (request) => {
+        if (request.url().includes("/api/30min")) {
+          request.respond({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({
+              ...fixture,
+              timeZone: "Europe/Paris",
+              cal: {
+                id: "30min",
+                label: CALENDAR_MAP["30min"].label,
+                emoji: CALENDAR_MAP["30min"].emoji,
+                originalUrl: CALENDAR_MAP["30min"].originalUrl,
+                description: CALENDAR_MAP["30min"].description,
+              },
+            }),
+          });
+        } else {
+          request.continue();
+        }
+      });
+
+      await page.goto(`${baseUrl}/30min`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#results.visible");
+      expect(await page.$eval("#update-banner", (banner) => banner.textContent)).to.not.include("Invalid Date");
+      expect(await page.$("#refresh-calendar")).to.not.equal(null);
+    } finally {
+      await browser.close();
+    }
+  } finally {
+    await closeServer(server);
   }
 });
 

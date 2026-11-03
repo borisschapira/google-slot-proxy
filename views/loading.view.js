@@ -34,6 +34,7 @@ function renderLoading(cal, locale = 'fr') {
             weekTemplate:       TRANSLATIONS[locale]['cal.week'] ?? TRANSLATIONS.en['cal.week'],
             empty:              t(locale, 'cal.empty'),
             updatedAt:          t(locale, 'shell.updatedAt'),
+            loadingRateLimited: t(locale, 'loading.rateLimited'),
             errorTitle:         t(locale, 'error.title'),
             errorDiagnose:      t(locale, 'error.diagnose'),
         },
@@ -159,7 +160,7 @@ function renderLoading(cal, locale = 'fr') {
         <label for="timezone-selector">${escapeHtml(t(locale, 'shell.timezone'))}</label>
         <select id="timezone-selector" aria-label="${escapeHtml(t(locale, 'shell.timezone'))}" disabled></select>
     </div>
-    <div id="loading">
+    <div id="loading" role="status" aria-live="polite" aria-busy="true">
         <div class="spinner"></div>
         <p class="loading-title">${escapeHtml(t(locale, 'loading.heading'))}</p>
         <p class="loading-sub">${escapeHtml(t(locale, 'loading.sub'))}</p>
@@ -174,6 +175,7 @@ function renderLoading(cal, locale = 'fr') {
     const I18N  = ${JSON.stringify(clientI18N)};
     const LANGUAGE_KEY = 'google-slot-proxy-language';
     const TIMEZONE_KEY = 'google-slot-proxy-timezone';
+    const RATE_LIMIT_RETRY_DELAY_MS = 2 * 60 * 1000;
     const calendarTimeZone = 'Europe/Paris';
     const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || calendarTimeZone;
     const browserLanguage = (navigator.languages || [navigator.language || 'en'])[0];
@@ -339,22 +341,36 @@ function renderLoading(cal, locale = 'fr') {
             weekSections;
     }
 
+    function scheduleRateLimitRetry() {
+        document.querySelector('.loading-title').textContent = I18N.strings.loadingRateLimited;
+        window.setTimeout(() => window.location.reload(), RATE_LIMIT_RETRY_DELAY_MS);
+    }
+
     fetch('/api/' + CAL.id, { cache: 'no-store' })
         .then(res => {
+            if (res.status === 429) {
+                scheduleRateLimitRetry();
+                return null;
+            }
             if (!res.ok) return res.json().then(j => Promise.reject(new Error(j.error || res.statusText)));
             return res.json();
         })
         .then(data => {
+            if (data === null) return;
             document.getElementById('loading').style.display = 'none';
+            document.getElementById('loading').setAttribute('aria-busy', 'false');
             const el = document.getElementById('results');
             const banner = document.getElementById('update-banner');
             let calendarData = data;
             let displayTimeZone = setupTimezoneSelector(data);
             const render = () => {
                 el.innerHTML = renderResults(calendarData, displayTimeZone);
-                const dateStr = new Date(calendarData.updatedAt).toLocaleString(I18N.intlLocale);
+                const updatedAt = new Date(calendarData.updatedAt);
+                const dateStr = Number.isNaN(updatedAt.getTime())
+                    ? ''
+                    : updatedAt.toLocaleString(I18N.intlLocale);
                 banner.innerHTML =
-                    '<span>' + esc(I18N.strings.updatedAt) + ' ' + esc(dateStr) + '</span>' +
+                    (dateStr ? '<span>' + esc(I18N.strings.updatedAt) + ' ' + esc(dateStr) + '</span>' : '') +
                     '<a id="refresh-calendar" href="/api/' + esc(CAL.id) + '?refresh=1">' + esc(I18N.strings.refresh) + '</a>' +
                     '<span id="refresh-status"></span>';
                 banner.hidden = false;
@@ -395,6 +411,7 @@ function renderLoading(cal, locale = 'fr') {
             el.classList.add('visible');
         })
         .catch(err => {
+            document.getElementById('loading').setAttribute('aria-busy', 'false');
             document.getElementById('loading').style.display = 'none';
             const s  = I18N.strings;
             const el = document.getElementById('error-box');

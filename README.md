@@ -12,6 +12,7 @@ Browser → Express server → local Puppeteer (dev) / Browserless (prod) → Go
 
 On a cache miss, a headless Chrome session navigates the Google Calendar scheduling page, extracts all available slots from each weekly view within the next 60 days, and renders them as a simple HTML page. When caching is enabled, scraped data is reused for up to 15 minutes; the calendar page shows when its data was last updated and lets visitors force an immediate refresh. In development, Chrome is launched locally by Puppeteer; other environments use [Browserless](https://browserless.io). The language defaults to the visitor's `Accept-Language` header (French or English), and can be changed with the selector in the Shell.
 Slot times are always rendered in the calendar's Europe/Paris timezone, regardless of the scraper or visitor machine timezone.
+Concurrent requests for the same calendar share one in-progress scrape, and browser sessions—including debug requests—are serialized within each server process to avoid exhausting the browser provider's concurrency limit.
 
 ---
 
@@ -227,6 +228,11 @@ The project is plain Node.js — no build step. Copy the files, run `npm install
 
 ### `BROWSERLESS_TOKEN environment variable is not set`
 Set the variable in your environment or `.env` file (see Configuration).
+
+### Calendar page reports a rate limit
+If the scraping provider responds with HTTP 429, the API returns that status
+with `Retry-After: 120`. The calendar page keeps its loading indicator visible
+and automatically reloads after two minutes to retry the scrape.
 
 ### Slots page loads but shows nothing
 Visit `/debug/30min` to inspect what the scraper found. Key fields:

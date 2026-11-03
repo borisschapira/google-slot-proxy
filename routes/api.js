@@ -15,6 +15,29 @@ function isCacheEnabled() {
 function createApiRouter(scraper = scrapeCalendar) {
     const router = Router();
     const cache = new Map();
+    const pendingScrapes = new Map();
+
+    function scrapeOnce(cal) {
+        const pending = pendingScrapes.get(cal.id);
+        if (pending) return pending;
+
+        const scrape = Promise.resolve()
+            .then(() => scraper(cal.originalUrl))
+            .then((data) => {
+                const updatedAt = Date.now();
+                if (isCacheEnabled()) {
+                    cache.set(cal.id, { data, createdAt: updatedAt });
+                }
+                return { data, updatedAt };
+            });
+        pendingScrapes.set(cal.id, scrape);
+
+        return scrape.finally(() => {
+            if (pendingScrapes.get(cal.id) === scrape) {
+                pendingScrapes.delete(cal.id);
+            }
+        });
+    }
 
     router.get('/:calId', async (req, res) => {
         const cal = CALENDAR_MAP[req.params.calId];
@@ -36,11 +59,7 @@ function createApiRouter(scraper = scrapeCalendar) {
             }
 
             if (data === undefined) {
-                data = await scraper(cal.originalUrl);
-                updatedAt = Date.now();
-                if (isCacheEnabled()) {
-                    cache.set(cal.id, { data, createdAt: updatedAt });
-                }
+                ({ data, updatedAt } = await scrapeOnce(cal));
             }
 
             res.json({
@@ -52,7 +71,12 @@ function createApiRouter(scraper = scrapeCalendar) {
             });
         } catch (err) {
             console.error(`[api] scrape error for ${cal.id}:`, err);
-            res.status(500).json({ error: err.message });
+            const isRateLimited =
+                err.status === 429 ||
+                err.statusCode === 429 ||
+                /unexpected server response:\s*429/i.test(err.message);
+            if (isRateLimited) res.setHeader('Retry-After', '120');
+            res.status(isRateLimited ? 429 : 500).json({ error: err.message });
         }
     });
 
